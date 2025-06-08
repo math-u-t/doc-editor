@@ -13,7 +13,7 @@ doc-editor
 
 Googleドライブに保存した以下の形式のファイルをGoogleドキュメントを使用して簡単に編集できます。
 
-html,css,JavaScript,Python,json
+    html,css,JavaScript,Python,json
 
 ## 機能 ##
 
@@ -31,9 +31,7 @@ html,css,JavaScript,Python,json
 
 「保存」を押すと、編集していたファイルが以下の形式で同じフォルダ内に新しく作成されます。
 
-’’’
-（ファイル名）-edit;YYYY;MM;DD^hh;mm;ss.(拡張子は同じ）
-’’’
+    （ファイル名）-edit;YYYY;MM;DD^hh;mm;ss.(拡張子は同じ）
 
 （セミコロンなのに注意してください）
 
