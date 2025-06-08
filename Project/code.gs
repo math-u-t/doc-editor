@@ -1,177 +1,181 @@
-function send_Scheduled_Messages() {
-  const startTime = new Date().getTime();
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const data = sheet.getDataRange().getValues();
-  const currentTime = new Date();
-  const rowsToDelete = [];
-  const messagesToSend = [];
+function onOpen() {
+  buildMenu();
+}
 
-  for (let i = 1; i < data.length; i++) {
-    const elapsedTime = (new Date().getTime() - startTime) / 1000;
-    if (elapsedTime > 5) {
-      throw new Error('Execution time exceeded 5 seconds, stopping script.');
-    }
+function buildMenu() {
+  const ui = DocumentApp.getUi();
+  ui.createMenu('ファイルを編集')
+    .addItem('読み込み', 'loadTextFile')
+    .addItem('保存', 'saveAsNewTextFile')
+    .addItem('ファイルの詳細', 'showFileDetails');
 
-    const row = data[i];
-    const email = row[1];
-    const message = row[3];
-    const sendTime = row[5] ? new Date(row[5]) : null;
-    const webhookUrl = row[6];
-
-    if (!sendTime || (currentTime - sendTime) / (1000 * 60) >= 2) {
-      rowsToDelete.push(i + 1);
-      continue;
-    }
-
-    if (!message || !webhookUrl) {
-      continue;
-    }
-
-    if (sendTime <= currentTime) {
-      let finalMessage = message;
-
-      if (finalMessage.includes('<hide>')) {
-        finalMessage = finalMessage.replace(/<hide>$/, '').trim();
-
-      } else {
-        if (email) {
-          finalMessage += `\n《${email}》\n`;
-        }
-      }
-
-      messagesToSend.push({ url: webhookUrl, message: finalMessage, rowIndex: i + 1 });
-    }
+  // HTMLファイルならhtmlで表示を追加
+  const props = PropertiesService.getDocumentProperties().getProperties();
+  if (props.mimeType === 'text/html') {
+    ui.createMenu('ファイルを編集')
+      .addItem('読み込み', 'loadTextFile')
+      .addItem('保存', 'saveAsNewTextFile')
+      .addItem('ファイルの詳細', 'showFileDetails')
+      .addItem('HTMLで表示', 'showHtmlContent')
+      .addToUi();
+  } else {
+    ui.createMenu('ファイルを編集')
+      .addItem('読み込み', 'loadTextFile')
+      .addItem('保存', 'saveAsNewTextFile')
+      .addItem('ファイルの詳細', 'showFileDetails')
+      .addToUi();
   }
+}
 
-  messagesToSend.forEach(({ url, message, rowIndex }) => {
-    const payload = JSON.stringify({ text: message });
-    const options = {
-      method: "post",
-      contentType: "application/json",
-      payload: payload,
-    };
+function loadTextFile() {
+  const ui = DocumentApp.getUi();
+  const response = ui.prompt('読み込みたいファイルのIDまたはGoogleドライブの共有リンクを入力してください（HTMLやJSなどのテキストファイル）');
+
+  if (response.getSelectedButton() === ui.Button.OK) {
+    let input = response.getResponseText().trim();
+
+    // URLからIDを抽出
+    const fileIdFromUrl = extractFileIdFromUrl(input);
+    const fileId = fileIdFromUrl || input;
+
+    if (!fileId.match(/^[a-zA-Z0-9_-]{10,}$/)) {
+      ui.alert('有効なファイルIDまたは共有リンクを入力してください。');
+      return;
+    }
 
     try {
-      UrlFetchApp.fetch(url, options);
-      rowsToDelete.push(rowIndex);
-    } catch (error) {
+      const file = DriveApp.getFileById(fileId);
+      const content = file.getBlob().getDataAsString();
+
+      // ドキュメントに書き込む
+      const doc = DocumentApp.getActiveDocument();
+      const body = doc.getBody();
+      body.clear();
+      body.setText(content);
+
+      // ファイル情報を保存
+      PropertiesService.getDocumentProperties().setProperties({
+        fileId: fileId,
+        fileName: file.getName(),
+        mimeType: file.getMimeType(),
+        parentFolderId: file.getParents().hasNext()
+          ? file.getParents().next().getId()
+          : ''
+      });
+
+      ui.alert('ファイルの内容を読み込みました。');
+
+      // メニュー更新（htmlで表示 の有無切替のため）
+      buildMenu();
+
+    } catch (e) {
+      ui.alert('ファイルの読み込みに失敗しました: ' + e.message);
     }
-  });
-
-  if (rowsToDelete.length > 0) {
-    rowsToDelete.sort((a, b) => b - a);
-    rowsToDelete.forEach(rowNum => sheet.deleteRow(rowNum));
   }
 }
 
-// エラーの詳細
-function send_Custom_Email() {
-  const startTime = new Date().getTime();
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 2) return;
-  var data = sheet.getRange(lastRow, 1, 1, 7).getValues()[0];
-  if (data[2] !== '送信予約') return;
-  var scheduledTime = new Date(data[5]);
-  var now = new Date();
-  var diffMinutes = (scheduledTime - now) / 60000;
-  var elapsedTime = (new Date().getTime() - startTime) / 1000;
-  if (elapsedTime > 5) {
-    throw new Error('Execution time exceeded 5 seconds, stopping script.');
-  }
+function saveAsNewTextFile() {
+  const props = PropertiesService.getDocumentProperties().getProperties();
+  const fileId = props.fileId;
+  const originalName = props.fileName;
+  const mimeType = props.mimeType || 'text/plain';
+  const folderId = props.parentFolderId;
 
-  if (data[3].length > 4000) {
-    send_Error_Email(data[1], "送信内容が4000文字を超えています。\n送信内容を短くしてください。");
-    sheet.deleteRow(lastRow);
+  if (!fileId || !originalName) {
+    DocumentApp.getUi().alert('先に「読み込み」を行ってください。');
     return;
-  }
-
-  elapsedTime = (new Date().getTime() - startTime) / 1000;
-  if (elapsedTime > 5) {
-    throw new Error('Execution time exceeded 5 seconds, stopping script.');
-  }
-
-  if (isNaN(scheduledTime.getTime()) || diffMinutes < -2) {
-    send_Error_Email(data[1], "送信予定時間が過去です。\n送信予定時間は未来になるようにしてください。");
-    sheet.deleteRow(lastRow);
-    return;
-  }
-
-  if (diffMinutes > 60 * 24 * 30) {
-    send_Error_Email(data[1], "送信予定時間が1か月以上先です。\n送信予定時間は1か月よりも最近にしてください。");
-    sheet.deleteRow(lastRow);
-    return;
-  }
-
-  var userCode = generate_Random_Code(30);
-  sheet.getRange(lastRow, 5).setValue(userCode);
-  var emailContent = create_Email_Content(data, userCode, scheduledTime);
-
-  elapsedTime = (new Date().getTime() - startTime) / 1000;
-  if (elapsedTime > 5) {
-    throw new Error('Execution time exceeded 5 seconds, stopping script.');
   }
 
   try {
-    GmailApp.sendEmail(data[1], "自動送信予約の詳細", emailContent, { name: "予約の確認（自動）" });
-    sheet.getRange(lastRow, 3).setValue('送信済み');
+    const extension = getExtensionFromMimeType(mimeType) || getExtensionFromFilename(originalName);
+    const baseName = originalName.replace(/\.[^/.]+$/, '');
+
+    // タイムスタンプの生成（;と^を使う形式）
+    const now = new Date();
+    const pad = n => n.toString().padStart(2, '0');
+    const timestamp = `${now.getFullYear()};${pad(now.getMonth() + 1)};${pad(now.getDate())}^${pad(now.getHours())};${pad(now.getMinutes())};${pad(now.getSeconds())}`;
+    const newName = `${baseName}-edit;${timestamp}.${extension}`;
+
+    const content = DocumentApp.getActiveDocument().getBody().getText();
+    const blob = Utilities.newBlob(content, mimeType, newName);
+    const newFile = DriveApp.createFile(blob);
+
+    // 元フォルダに移動
+    if (folderId) {
+      const folder = DriveApp.getFolderById(folderId);
+      folder.addFile(newFile);
+      DriveApp.getRootFolder().removeFile(newFile);
+    }
+
+    DocumentApp.getUi().alert(`ファイルを保存しました: ${newName}`);
+
   } catch (e) {
+    DocumentApp.getUi().alert('保存に失敗しました: ' + e.message);
   }
 }
 
-// エラーメッセージ送信
-function send_Error_Email(recipient, errorMessage) {
-  var subject = "予約できませんでした";
-  var body = "詳細：" + errorMessage +
-    "\nもう一度予約を行ってください。" +
-    "\n\nこのメッセージは自動送信されています。" +
-    "\n返信しないでください。";
-  generalization_send_Email(recipient, subject, body);
-}
+function showFileDetails() {
+  const props = PropertiesService.getDocumentProperties().getProperties();
+  const ui = DocumentApp.getUi();
 
-// 成功メッセージ送信
-function create_Email_Content(data, userCode, scheduledTime) {
-  return [
-    "予約者 : " + data[1],
-    "送信内容 : " + data[3],
-    "送信予定時間 : " + format_Date(scheduledTime),
-    "webhookURL : " + data[6],
-    "予約コード : " + userCode,
-    "予約が完了しました。",
-    "\nご利用ありがとうございます。",
-    "このメッセージは自動で送信されています。",
-    "返信しないでください。"
-  ].join("\n");
-}
-
-// 日付形式変換
-function format_Date(date) {
-  const year = date.getFullYear();
-  const month = (date.getMonth() + 1).toString().padStart(2, '0');
-  const day = date.getDate().toString().padStart(2, '0');
-  const hours = date.getHours().toString().padStart(2, '0');
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  const seconds = date.getSeconds().toString().padStart(2, '0');
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-}
-
-// 予約コード生成
-function generate_Random_Code(length) {
-  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  const charsLength = chars.length;
-  let code = new Array(length);
-  
-  for (let i = 0; i < length; i++) {
-    code[i] = chars[Math.floor(Math.random() * charsLength)];
+  if (!props.fileId || !props.fileName) {
+    ui.alert('まだファイルを読み込んでいません。');
+    return;
   }
 
-  return code.join('');
+  const folderId = props.parentFolderId;
+  let folderUrl = 'なし';
+  if (folderId) {
+    folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
+  }
+
+  const message = 
+    `ファイル名: ${props.fileName}\n` +
+    `ファイルID: ${props.fileId}\n` +
+    `保存先フォルダ: ${folderUrl}`;
+
+  ui.alert('現在編集中のファイル詳細', message, ui.ButtonSet.OK);
 }
 
-// 一般化送信
-function generalization_send_Email(email, subject, body) {
-  try {
-    GmailApp.sendEmail(email, subject, body, { name: "予約の確認《自動送信》" });
-  } catch (e) {
+// htmlで表示用
+function showHtmlContent() {
+  const props = PropertiesService.getDocumentProperties().getProperties();
+  if (!props.fileId || !props.fileName) {
+    DocumentApp.getUi().alert('まだファイルを読み込んでいません。');
+    return;
   }
+  const htmlContent = DocumentApp.getActiveDocument().getBody().getText();
+
+  const htmlOutput = HtmlService.createHtmlOutput(htmlContent)
+    .setWidth(2000)
+    .setHeight(1500)
+    .setTitle('HTMLファイルの内容');
+
+  DocumentApp.getUi().showModalDialog(htmlOutput, 'HTMLで表示');
+}
+
+// URLからGoogleドライブファイルIDを抽出するヘルパー関数
+function extractFileIdFromUrl(url) {
+  const regex = /\/d\/([a-zA-Z0-9_-]{10,})/;
+  const match = url.match(regex);
+  return match ? match[1] : null;
+}
+
+// MIMEタイプから拡張子を取得
+function getExtensionFromMimeType(mimeType) {
+  const map = {
+    'text/html': 'html',
+    'application/javascript': 'js',
+    'text/css': 'css',
+    'application/json': 'json',
+    'text/x-python': 'py',
+    'text/plain': 'txt'
+  };
+  return map[mimeType] || null;
+}
+
+// ファイル名から拡張子を取得
+function getExtensionFromFilename(filename) {
+  const match = filename.match(/\.([a-z0-9]+)$/i);
+  return match ? match[1] : 'txt';
 }
