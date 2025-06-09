@@ -11,9 +11,9 @@ doc-editor
 
 ## 何ができるか ##
 
-Googleドライブに保存した以下の形式のファイルをGoogleドキュメントを使用して簡単に編集できます。
+Googleドライブに保存した以下の形式のファイルをGoogleドキュメントを使用して簡単に編集できます。(この形式でなくてもバイナリで編集できます。)
 
-    html,css,JavaScript,Python,json
+    html,css,JavaScript,Python,json,csv
 
 ## 機能 ##
 
